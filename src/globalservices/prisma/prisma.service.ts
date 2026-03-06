@@ -1,9 +1,9 @@
 
 import { Global, Injectable, Optional } from '@nestjs/common';
-import { PrismaClient } from '../generated/prisma/client';
 
 import { PrismaNeon } from '@prisma/adapter-neon';
 import { ConfigService } from '@nestjs/config';
+import { PrismaClient } from 'generated/prisma/client';
 
 
 @Global()

@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:18.3-alpine
+    ports:
+      - "51213:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: template1
+    volumes:
+      - ./postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
