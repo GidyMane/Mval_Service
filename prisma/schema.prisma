@@ -115,6 +115,7 @@ model Property {
   @@index([city])
   @@index([salePrice])
   @@index([rentPrice])
+  propertyViews PropertyView[]
 }
 
 // ── Type-specific detail tables ──────────
