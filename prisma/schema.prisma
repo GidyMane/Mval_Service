@@ -14,3 +14,449 @@ datasource db {
   provider = "postgresql"
   
 }
+// ─────────────────────────────────────────
+// AUTH & USERS (Admin side only)
+// ─────────────────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  STAFF
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(STAFF)
+  phone        String?
+  avatarUrl    String?
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  assignedEnquiries Enquiry[]     @relation("AssignedTo")
+  activityLogs      ActivityLog[]
+  enquiryNotes      EnquiryNote[]
+  properties        Property[]    @relation("ManagedBy")
+}
+
+// ─────────────────────────────────────────
+// PROPERTIES
+// ─────────────────────────────────────────
+
+enum ListingType {
+  FOR_SALE
+  FOR_RENT
+  SHORT_LET
+}
+
+enum PropertyStatus {
+  AVAILABLE
+  UNDER_OFFER
+  SOLD
+  RENTED
+  WITHDRAWN
+}
+
+// Base property — fields shared by ALL property types
+model Property {
+  id           String         @id @default(cuid())
+  title        String
+  slug         String         @unique
+  description  String
+  listingType  ListingType
+  status       PropertyStatus @default(AVAILABLE)
+  isFeatured   Boolean        @default(false)
+  isPublished  Boolean        @default(false)
+  publishedAt  DateTime?
+
+  // Pricing — only one will be set depending on listingType
+  salePrice    Decimal?       @db.Decimal(12, 2) // FOR_SALE
+  rentPrice    Decimal?       @db.Decimal(12, 2) // FOR_RENT (monthly)
+  shortLetPrice Decimal?      @db.Decimal(12, 2) // SHORT_LET (per night/week)
+  currency     String         @default("KES")
+
+  // Location
+  address      String
+  city         String
+  county       String?
+  country      String         @default("Kenya")
+  latitude     Float?
+  longitude    Float?
+
+  // Common physical attributes
+  sizeValue    Float?
+  sizeUnit     String?        // "sqft" | "sqm" | "acres"
+
+  // Polymorphic detail — only one will be populated
+  apartmentDetail  ApartmentDetail?
+  houseDetail      HouseDetail?
+  commercialDetail CommercialDetail?
+  landDetail       LandDetail?
+
+  // Relations
+  images       PropertyImage[]
+  amenities    PropertyAmenity[]
+  tags         PropertyTag[]
+  enquiries    Enquiry[]
+  bookings     Booking[]
+  category     PropertyCategory? @relation(fields: [categoryId], references: [id])
+  categoryId   String?
+  managedBy    User?             @relation("ManagedBy", fields: [managedById], references: [id])
+  managedById  String?
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([status, listingType])
+  @@index([city])
+  @@index([salePrice])
+  @@index([rentPrice])
+}
+
+// ── Type-specific detail tables ──────────
+
+// Apartments & flats
+model ApartmentDetail {
+  id           String   @id @default(cuid())
+  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId   String   @unique
+  bedrooms     Int
+  bathrooms    Int
+  floor        Int?     // which floor the unit is on
+  totalFloors  Int?     // total floors in the building
+  parkingSpots Int      @default(0)
+  isFurnished  Boolean  @default(false)
+  hasBalcony   Boolean  @default(false)
+  hasGym       Boolean  @default(false)
+  hasPool      Boolean  @default(false)
+  hasCCTV      Boolean  @default(false)
+  hasGenerator Boolean  @default(false)
+}
+
+// Standalone houses, townhouses, maisonettes, villas
+model HouseDetail {
+  id           String   @id @default(cuid())
+  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId   String   @unique
+  bedrooms     Int
+  bathrooms    Int
+  stories      Int      @default(1)
+  parkingSpots Int      @default(0)
+  isFurnished  Boolean  @default(false)
+  hasGarden    Boolean  @default(false)
+  hasPool      Boolean  @default(false)
+  hasGate      Boolean  @default(false)
+  hasGarage    Boolean  @default(false)
+  hasBQ        Boolean  @default(false) // Boys quarter / servant quarters
+}
+
+// Office space, retail, warehouse, etc.
+model CommercialDetail {
+  id              String   @id @default(cuid())
+  property        Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId      String   @unique
+  commercialType  String   // "office" | "retail" | "warehouse" | "industrial"
+  floor           Int?
+  totalFloors     Int?
+  parkingSpots    Int      @default(0)
+  hasReception    Boolean  @default(false)
+  hasBoardroom    Boolean  @default(false)
+  hasLifts        Boolean  @default(false)
+  isOpenPlan      Boolean  @default(false)
+  numberOfRooms   Int?
+}
+
+// Raw land / plots
+model LandDetail {
+  id          String   @id @default(cuid())
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId  String   @unique
+  landType    String   // "residential" | "commercial" | "agricultural" | "mixed-use"
+  isServiced  Boolean  @default(false) // water, electricity connected
+  isFenced    Boolean  @default(false)
+  hasRoadAccess Boolean @default(true)
+  titleDeedType String? // "freehold" | "leasehold"
+}
+
+// ── Supporting property models ────────────
+
+model PropertyImage {
+  id         String   @id @default(cuid())
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId String
+  url        String
+  altText    String?
+  isPrimary  Boolean  @default(false)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+}
+
+model PropertyCategory {
+  id          String     @id @default(cuid())
+  name        String     @unique  // "Apartment" | "House" | "Land" | "Commercial"
+  slug        String     @unique
+  description String?
+  properties  Property[]
+  createdAt   DateTime   @default(now())
+}
+
+model Amenity {
+  id         String            @id @default(cuid())
+  name       String            @unique  // "Swimming Pool" | "Borehole" | "24hr Security"
+  icon       String?
+  properties PropertyAmenity[]
+}
+
+model PropertyAmenity {
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId String
+  amenity    Amenity  @relation(fields: [amenityId], references: [id])
+  amenityId  String
+
+  @@id([propertyId, amenityId])
+}
+
+model Tag {
+  id         String        @id @default(cuid())
+  name       String        @unique
+  slug       String        @unique
+  properties PropertyTag[]
+}
+
+model PropertyTag {
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId String
+  tag        Tag      @relation(fields: [tagId], references: [id])
+  tagId      String
+
+  @@id([propertyId, tagId])
+}
+
+// ─────────────────────────────────────────
+// ENQUIRIES — no account needed, public modal
+// ─────────────────────────────────────────
+
+enum EnquiryType {
+  PROPERTY_INFO     // "I want more info about this property"
+  QUOTE_REQUEST     // "Request a quote"
+  VIEWING_REQUEST   // "I want to book a viewing"
+  GENERAL           // General contact form
+}
+
+enum EnquiryStatus {
+  NEW
+  IN_PROGRESS
+  QUALIFIED
+  UNQUALIFIED
+  CONVERTED
+  CLOSED
+}
+
+enum EnquirySource {
+  WEBSITE_MODAL
+  WHATSAPP
+  PHONE
+  EMAIL
+  WALK_IN
+  REFERRAL
+  SOCIAL_MEDIA
+}
+
+// Anonymous contact — no account required
+model Lead {
+  id        String     @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  createdAt DateTime   @default(now())
+
+  enquiries Enquiry[]
+
+  // At least one of email or phone is expected at the app level
+  @@index([email])
+  @@index([phone])
+}
+
+model Enquiry {
+  id           String        @id @default(cuid())
+  lead         Lead          @relation(fields: [leadId], references: [id])
+  leadId       String
+  type         EnquiryType   @default(PROPERTY_INFO)
+  message      String?
+  source       EnquirySource @default(WEBSITE_MODAL)
+  status       EnquiryStatus @default(NEW)
+  isRead       Boolean       @default(false)
+
+  // Optional property reference — null for general enquiries
+  property     Property?     @relation(fields: [propertyId], references: [id])
+  propertyId   String?
+
+  // Admin assignment
+  assignedTo   User?         @relation("AssignedTo", fields: [assignedToId], references: [id])
+  assignedToId String?
+
+  // Relations
+  booking      Booking?
+  notes        EnquiryNote[]
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model EnquiryNote {
+  id        String   @id @default(cuid())
+  enquiry   Enquiry  @relation(fields: [enquiryId], references: [id], onDelete: Cascade)
+  enquiryId String
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  String
+  content   String
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────
+// BOOKINGS / VIEWINGS
+// ─────────────────────────────────────────
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Booking {
+  id          String        @id @default(cuid())
+  enquiry     Enquiry       @relation(fields: [enquiryId], references: [id])
+  enquiryId   String        @unique
+  property    Property      @relation(fields: [propertyId], references: [id])
+  propertyId  String
+  status      BookingStatus @default(PENDING)
+  scheduledAt DateTime
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+// ─────────────────────────────────────────
+// SERVICES (public-facing service pages)
+// ─────────────────────────────────────────
+
+model Service {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  description String
+  iconUrl     String?
+  imageUrl    String?
+  isPublished Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────
+// CONTENT (About, Team, Testimonials)
+// ─────────────────────────────────────────
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  name      String
+  title     String
+  bio       String?
+  photoUrl  String?
+  email     String?
+  phone     String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Testimonial {
+  id          String   @id @default(cuid())
+  clientName  String
+  clientTitle String?
+  content     String
+  rating      Int?     // 1–5
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+// ─────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  channel   NotificationChannel
+  recipient String              // email or phone number
+  subject   String?
+  body      String
+  status    NotificationStatus  @default(PENDING)
+  sentAt    DateTime?
+  error     String?
+  metadata  Json?               // { enquiryId, bookingId, propertyId }
+  createdAt DateTime            @default(now())
+}
+
+// ─────────────────────────────────────────
+// ANALYTICS / ACTIVITY
+// ─────────────────────────────────────────
+
+model ActivityLog {
+  id         String   @id @default(cuid())
+  user       User?    @relation(fields: [userId], references: [id])
+  userId     String?
+  action     String   // "PROPERTY_PUBLISHED" | "ENQUIRY_ASSIGNED" | "BOOKING_CONFIRMED"
+  entityType String?  // "Property" | "Enquiry" | "Booking"
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// Tracks public page/property views for dashboard analytics
+model PropertyView {
+  id         String   @id @default(cuid())
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId String
+  ipHash     String?  // hashed for privacy
+  userAgent  String?
+  referrer   String?
+  createdAt  DateTime @default(now())
+
+  @@index([propertyId])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────
+// SITE SETTINGS
+// ─────────────────────────────────────────
+
+model SiteSetting {
+  key       String   @id  // "contact_phone" | "contact_email" | "hero_tagline"
+  value     String
+  updatedAt DateTime @updatedAt
+}
